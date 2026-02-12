@@ -101,7 +101,6 @@ These map directly to the GitHub issues for Sprint 1.
 
 ## TODO - Notes - Issues
 
-1. Create a release in GitHub with a version number (e.g., `v0.1.0`) that includes this code.
-2. Add ability to delete multilple workouts at once
-3. Add picture entries capabilities to exercises.
-4. Add premade exercise/workouts templates (helps with new users).
+1. Add ability to delete multilple workouts at once
+2. Add picture entries capabilities to exercises.
+3. Add premade exercise/workouts templates (helps with new users).
