@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page">
+  {% if mode == "create" %}
+    <h2>New Workout</h2>
+  {% else %}
+    <h2>Edit Workout</h2>
+  {% endif %}
+
+  <!-- Issue #11 NFR: Quick Start hint by default + More/Less toggle -->
+  <div class="hint" role="note">
+    <div class="hint-header">
+      <strong>Quick Start</strong>
+      <button class="link-button" type="button" data-toggle="quickstart" aria-expanded="true">
+        More / less info
+      </button>
+    </div>
+    <div class="hint-body" id="quickstart">
+      <ol>
+        <li>Pick a date.</li>
+        <li>Add an exercise (example: “Bench Press”).</li>
+        <li>Add at least one set (reps ≥ 1, weight ≥ 0).</li>
+        <li>Press <strong>Save</strong>. You can edit later.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div id="form-errors" class="errors" hidden></div>
+
+  <div id="workout-form"
+       data-mode="{{ mode }}"
+       data-workout-id="{{ workout_id if workout_id else '' }}">
+    <div class="form-grid">
+      <label class="field">
+        <span>Date <span class="muted">(required)</span></span>
+        <input id="workout-date" type="date" required />
+      </label>
+
+      <label class="field">
+        <span>Title <span class="muted">(optional)</span></span>
+        <input id="workout-title" type="text" maxlength="60" placeholder="e.g., Push Day" />
+      </label>
+    </div>
+
+    <!-- IH#6: explicit path through the task -->
+    <div class="step">
+      <h3>1) Add exercises</h3>
+      <p class="muted">
+        Use the <strong>+ Exercise</strong> button, or press Enter while in the “Exercise name” field.
+      </p>
+
+      <!-- IH#4: familiar UI patterns (simple text input + button) -->
+      <div class="row">
+        <input id="new-exercise-name" type="text" placeholder="Exercise name (e.g., Squat)" />
+        <button class="button" id="add-exercise" type="button">+ Exercise</button>
+      </div>
+
+      <div id="exercise-list" class="exercise-list"></div>
+    </div>
+
+    <div class="step">
+      <h3>2) Review & save</h3>
+
+      <!-- IH#5: undo/backtracking available -->
+      <div class="row">
+        <button class="button button-secondary" id="undo-last-set" type="button">
+          Undo last set-entry
+        </button>
+        <span class="muted" id="undo-help">Removes the most recently added set (does not delete the workout).</span>
+      </div>
+
+      <div class="row row-spaced">
+        <a class="button button-secondary" href="{{ url_for('home') }}" id="cancel-link">
+          Cancel
+        </a>
+
+        <button class="button nav-primary" id="save-workout" type="button">
+          {% if mode == "create" %}Save Workout{% else %}Save Changes{% endif %}
+        </button>
+      </div>
+
+      <p class="muted">
+        <!-- IH#2 + IH#8 -->
+        Saving updates your history immediately. Deleting sets requires one confirmation; editing numbers does not.
+      </p>
+    </div>
+  </div>
+</section>
+
+<script>
+  window.__PAGE__ = {
+    name: "workout_form",
+    mode: "{{ mode }}",
+    workoutId: {{ workout_id if workout_id else "null" }}
+  };
+</script>
+{% endblock %}

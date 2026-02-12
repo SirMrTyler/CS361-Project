@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title if title else "Workout Logger (Milestone #1)" }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="app-header">
+    <div class="header-inner">
+      <div>
+        <h1 class="app-title">Workout Logger</h1>
+        <p class="app-subtitle">
+          Log workouts, review your history, and keep your training data accurate.
+        </p>
+      </div>
+
+      <nav class="nav">
+        <a class="nav-link" href="{{ url_for('home') }}">Workout History</a>
+        <a class="nav-link nav-primary" href="{{ url_for('new_workout_page') }}">+ New Workout</a>
+      </nav>
+    </div>
+
+    <!-- IH#1: explain benefits -->
+    <div class="callout">
+      <strong>Why this helps:</strong> consistent workout logs make it easier to plan your next session and track progress.
+      <button class="link-button" type="button" data-toggle="benefits" aria-expanded="false">
+        More / less info
+      </button>
+      <div class="callout-details" id="benefits" hidden>
+        <ul>
+          <li>See what you lifted last time so you can progress gradually.</li>
+          <li>Fix mistakes later (edit sets) so your data stays accurate.</li>
+          <li>Use “undo” while logging if you accidentally add the wrong set.</li>
+        </ul>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+
+  <footer class="footer">
+    <small>
+      Milestone #1: Create, view, and edit workouts (local-only demo). No private data is sent anywhere.
+    </small>
+  </footer>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

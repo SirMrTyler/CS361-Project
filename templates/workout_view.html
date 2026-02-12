@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page" data-workout-id="{{ workout_id }}">
+  <div class="row row-spaced">
+    <h2>Workout Details</h2>
+    <a class="button button-secondary" href="{{ url_for('home') }}">Back to history</a>
+  </div>
+
+  <div id="workout-details" class="details"></div>
+
+  <div class="row row-spaced">
+    <a class="button" id="edit-workout" href="{{ url_for('edit_workout_page', workout_id=workout_id) }}">Edit</a>
+
+    <!-- Optional but useful (IH#2, IH#8): destructive action with confirmation -->
+    <button class="button danger" id="delete-workout" type="button">Delete workout</button>
+  </div>
+
+  <p class="muted">
+    Deleting a workout is permanent. You’ll be asked once to confirm.
+  </p>
+</section>
+
+<script>
+  window.__PAGE__ = { name: "workout_view", workoutId: {{ workout_id }} };
+</script>
+{% endblock %}

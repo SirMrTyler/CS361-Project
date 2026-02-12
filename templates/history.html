@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page">
+  <h2>Workout History</h2>
+
+  <!-- IH#2: explain costs -->
+  <p class="muted">
+    Tip: logging a workout usually takes <strong>1–2 minutes</strong>. You can always edit later.
+    Deleting is permanent (you’ll be asked once to confirm).
+  </p>
+
+  <div class="row">
+    <button class="button" id="refresh-history" type="button">Refresh</button>
+
+    <!-- Optional helper to demonstrate responsiveness criteria -->
+    <button class="button button-secondary" id="seed-data" type="button">
+      Generate 200 sample workouts
+    </button>
+
+    <span class="muted" id="history-timing" aria-live="polite"></span>
+  </div>
+
+  <div id="empty-state" class="empty" hidden>
+    <h3>No workouts yet</h3>
+    <p>
+      Create your first workout to start building your history.
+    </p>
+    <a class="button nav-primary" href="{{ url_for('new_workout_page') }}">+ New Workout</a>
+  </div>
+
+  <div id="workout-list" class="card-list" aria-label="Saved workouts"></div>
+</section>
+
+<script>
+  window.__PAGE__ = { name: "history" };
+</script>
+{% endblock %}
