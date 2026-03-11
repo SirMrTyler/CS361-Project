@@ -279,3 +279,22 @@ input[type="text"], input[type="date"], input[type="number"] {
   color: var(--muted);
   border-top: 1px solid var(--border);
 }
+
+.nav-user {
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.auth-page {
+  max-width: 520px;
+}
+
+.auth-form {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 12px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}

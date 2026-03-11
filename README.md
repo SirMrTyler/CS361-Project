@@ -104,3 +104,32 @@ These map directly to the GitHub issues for Sprint 1.
 1. Add ability to delete multilple workouts at once
 2. Add picture entries capabilities to exercises.
 3. Add premade exercise/workouts templates (helps with new users).
+
+## Login / Logout Test Instructions
+
+1. Start the workout app:
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+2. Open `http://127.0.0.1:5000`. You should be redirected to `/login`.
+3. Test **Create account** with a new username/password (password must be 8+ chars per auth service rules).
+4. After signup, confirm you are sent to Workout History and can access:
+   - `/`
+   - `/new`
+   - `/workout/<id>` (for an existing workout)
+5. Click **Logout** in the header and verify:
+   - You return to `/login`
+   - Visiting `/` redirects back to `/login`
+6. Test **Login** with the same credentials and verify access returns.
+
+### Optional API auth checks (with curl)
+
+```bash
+# Not logged in: should return 401
+curl -i http://127.0.0.1:5000/api/workouts
+```
+
+After login in browser, app API calls are authenticated through Flask session cookies automatically.

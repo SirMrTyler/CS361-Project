@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page auth-page">
+  <h2>Login</h2>
+  <p class="muted">Sign in to access your workouts. New users can create an account from this same form.</p>
+
+  {% if error %}
+    <div class="errors">
+      <strong>Login failed:</strong> {{ error }}
+    </div>
+  {% endif %}
+
+  <form class="auth-form" method="post" action="{{ url_for('login_action') }}">
+    <label class="field">
+      <span>Username</span>
+      <input type="text" name="username" value="{{ username if username else '' }}" required />
+    </label>
+
+    <label class="field">
+      <span>Password</span>
+      <input type="password" name="password" required />
+    </label>
+
+    <div class="row">
+      <button class="button nav-primary" type="submit" name="mode" value="login">Login</button>
+      <button class="button button-secondary" type="submit" name="mode" value="signup">Create account</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

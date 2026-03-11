@@ -15,12 +15,14 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from functools import wraps
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from flask import Flask, jsonify, render_template, request
-
+from flask import redirect, session, url_for
 
 # ----------------------------
 # App + DB setup
@@ -28,31 +30,127 @@ from flask import Flask, jsonify, render_template, request
 
 def create_app() -> Flask:
     app = Flask(__name__, instance_relative_config=True)
+    app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
 
     # Store DB in instance/ so it doesn't get accidentally committed.
     os.makedirs(app.instance_path, exist_ok=True)
     app.config["DATABASE_PATH"] = os.path.join(app.instance_path, "workouts.sqlite3")
+    app.config["AUTH_BASE_URL"] = os.getenv(
+        "AUTH_BASE_URL",
+        "https://very-ardenia-sirmrtyler-tech-solutions-llc-1a046f3f.koyeb.app",
+    ).rstrip("/")
+    app.config["AUTH_APP_ID"] = os.getenv("AUTH_APP_ID", "workouts-app")
+    app.config["AUTH_APP_SECRET"] = os.getenv("AUTH_APP_SECRET", "bench225")
 
     init_db(app.config["DATABASE_PATH"])
+
+    def auth_headers() -> Dict[str, str]:
+        return {
+            "X-App-Id": app.config["AUTH_APP_ID"],
+            "X-App-Secret": app.config["AUTH_APP_SECRET"],
+            "Content-Type": "application/json",
+        }
+
+    def auth_post(path: str, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        url = f"{app.config['AUTH_BASE_URL']}{path}"
+        try:
+            resp = requests.post(url, headers=auth_headers(), json=payload, timeout=5)
+        except requests.RequestException:
+            return None, "Authentication service unavailable. Please try again shortly."
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+
+        if not resp.ok:
+            message = data.get("error", {}).get("message") or f"Authentication failed ({resp.status_code})."
+            return None, message
+
+        return data, None
+
+    def require_login(api: bool = False):
+        def decorator(view_func):
+            @wraps(view_func)
+            def wrapped(*args, **kwargs):
+                user = session.get("auth_user")
+                if not user:
+                    if api:
+                        return jsonify({"ok": False, "error": "Authentication required."}), 401
+                    return redirect(url_for("login_page"))
+
+                data, err = auth_post("/introspect", {"sessionId": user.get("sessionId")})
+                if err or not data or not data.get("active"):
+                    session.pop("auth_user", None)
+                    if api:
+                        return jsonify({"ok": False, "error": "Session expired. Please log in again."}), 401
+                    return redirect(url_for("login_page"))
+                return view_func(*args, **kwargs)
+
+            return wrapped
+
+        return decorator
 
     # ----------------------------
     # UI routes
     # ----------------------------
 
     @app.get("/")
+    @require_login()
     def home() -> str:
         # Temporary landing = history page (consistent with Sprint 1 plan)
         return render_template("history.html")
 
+    @app.get("/login")
+    def login_page() -> str:
+        if session.get("auth_user"):
+            return redirect(url_for("home"))
+        return render_template("login.html")
+
+    @app.post("/login")
+    def login_action():
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        mode = (request.form.get("mode") or "login").strip().lower()
+
+        if not username or not password:
+            return render_template("login.html", error="Username and password are required."), 400
+
+        endpoint = "/signup" if mode == "signup" else "/login"
+        data, err = auth_post(endpoint, {"username": username, "password": password})
+        if err:
+            return render_template("login.html", error=err, username=username), 401
+
+        session["auth_user"] = {
+            "username": username,
+            "userId": data.get("userId"),
+            "sessionId": data.get("sessionId"),
+            "token": data.get("token"),
+        }
+        return redirect(url_for("home"))
+
+    @app.get("/logout")
+    @require_login()
+    def logout_action():
+        user = session.get("auth_user") or {}
+        if user.get("sessionId"):
+            auth_post("/logout", {"sessionId": user["sessionId"]})
+        session.pop("auth_user", None)
+        return redirect(url_for("login_page"))
+
+
     @app.get("/new")
+    @require_login()
     def new_workout_page() -> str:
         return render_template("workout_form.html", mode="create", workout_id=None)
 
     @app.get("/workout/<int:workout_id>")
+    @require_login()
     def view_workout_page(workout_id: int) -> str:
         return render_template("workout_view.html", workout_id=workout_id)
 
     @app.get("/workout/<int:workout_id>/edit")
+    @require_login()
     def edit_workout_page(workout_id: int) -> str:
         return render_template("workout_form.html", mode="edit", workout_id=workout_id)
 
@@ -61,6 +159,7 @@ def create_app() -> Flask:
     # ----------------------------
 
     @app.get("/api/workouts")
+    @require_login(api=True)
     def api_list_workouts():
         t0 = time.perf_counter()
         workouts = list_workouts(app.config["DATABASE_PATH"])
@@ -68,6 +167,7 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "workouts": workouts, "timing_ms": elapsed_ms})
 
     @app.get("/api/workouts/<int:workout_id>")
+    @require_login(api=True)
     def api_get_workout(workout_id: int):
         t0 = time.perf_counter()
         workout = get_workout(app.config["DATABASE_PATH"], workout_id)
@@ -77,6 +177,7 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "workout": workout, "timing_ms": elapsed_ms})
 
     @app.post("/api/workouts")
+    @require_login(api=True)
     def api_create_workout():
         payload = request.get_json(silent=True) or {}
         errors = validate_workout_payload(payload)
@@ -88,6 +189,7 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "workout_id": workout_id, "workout": workout}), 201
 
     @app.put("/api/workouts/<int:workout_id>")
+    @require_login(api=True)
     def api_update_workout(workout_id: int):
         payload = request.get_json(silent=True) or {}
         errors = validate_workout_payload(payload)
@@ -102,6 +204,7 @@ def create_app() -> Flask:
         return jsonify({"ok": True, "workout": workout})
 
     @app.delete("/api/workouts/<int:workout_id>")
+    @require_login(api=True)
     def api_delete_workout(workout_id: int):
         deleted = delete_workout(app.config["DATABASE_PATH"], workout_id)
         if not deleted:
@@ -110,12 +213,17 @@ def create_app() -> Flask:
 
     # Helpful for demonstrating responsiveness with 200 workouts (Issue #12)
     @app.post("/api/debug/seed")
+    @require_login(api=True)
     def api_debug_seed():
         payload = request.get_json(silent=True) or {}
         count = int(payload.get("count", 200))
         count = max(1, min(count, 2000))  # keep bounded
         created = seed_sample_data(app.config["DATABASE_PATH"], count=count)
         return jsonify({"ok": True, "created": created})
+    
+    @app.context_processor
+    def inject_auth_user() -> Dict[str, Any]:
+        return {"auth_user": session.get("auth_user")}
 
     return app
 
