@@ -11,6 +11,8 @@
 
   <div class="row">
     <button class="button" id="refresh-history" type="button">Refresh</button>
+    <button class="button danger" id="delete-selected" type="button" disabled>Delete Selected</button>
+    <button class="button danger" id="delete-all" type="button" disabled>Delete All</button>
 
     <!-- Optional helper to demonstrate responsiveness criteria -->
     <button class="button button-secondary" id="seed-data" type="button">
@@ -18,6 +20,14 @@
     </button>
 
     <span class="muted" id="history-timing" aria-live="polite"></span>
+  </div>
+
+  <div class="row" id="history-bulk-row" hidden>
+    <label class="check-inline">
+      <input type="checkbox" id="select-all-workouts" />
+      Select all visible workouts
+    </label>
+    <span class="muted" id="history-selection-status" aria-live="polite"></span>
   </div>
 
   <div id="empty-state" class="empty" hidden>

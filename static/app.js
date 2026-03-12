@@ -79,6 +79,50 @@ function escapeHtml(s) {
 // History page
 // ------------------------------------------------------
 
+const historyState = {
+  selectedIds: new Set(),
+  workouts: []
+};
+
+function updateHistorySelectionUI() {
+  const workouts = historyState.workouts || [];
+  const total = workouts.length;
+  const selected = historyState.selectedIds.size;
+
+  const selectAllEl = $("#select-all-workouts");
+  const bulkRow = $("#history-bulk-row");
+  const statusEl = $("#history-selection-status");
+  const deleteSelectedBtn = $("#delete-selected");
+  const deleteAllBtn = $("#delete-all");
+
+  if (bulkRow) bulkRow.hidden = total === 0;
+
+  if (selectAllEl) {
+    selectAllEl.checked = total > 0 && selected === total;
+    selectAllEl.indeterminate = selected > 0 && selected < total;
+    selectAllEl.disabled = total === 0;
+  }
+
+  if (statusEl) {
+    statusEl.textContent = total === 0 ? "" : `${selected} selected of ${total}`;
+  }
+
+  if (deleteSelectedBtn) deleteSelectedBtn.disabled = selected === 0;
+  if (deleteAllBtn) deleteAllBtn.disabled = total === 0;
+}
+
+function attachHistorySelectionHandlers() {
+  $all(".workout-select").forEach(input => {
+    input.addEventListener("change", () => {
+      const id = Number(input.value);
+      if (!Number.isFinite(id)) return;
+      if (input.checked) historyState.selectedIds.add(id);
+      else historyState.selectedIds.delete(id);
+      updateHistorySelectionUI();
+    });
+  });
+}
+
 async function loadHistory() {
   const listEl = $("#workout-list");
   const emptyEl = $("#empty-state");
@@ -89,11 +133,15 @@ async function loadHistory() {
   try {
     const data = await fetchJson("/api/workouts");
     const workouts = data.workouts || [];
+    historyState.workouts = workouts;
+    historyState.selectedIds = new Set();
+
     if (timingEl) timingEl.textContent = `Loaded in ${data.timing_ms} ms`;
 
     if (workouts.length === 0) {
       listEl.innerHTML = "";
       emptyEl.hidden = false;
+      updateHistorySelectionUI();
       return;
     }
 
@@ -103,7 +151,13 @@ async function loadHistory() {
       const displayTitle = title ? title : "Workout";
       return `
         <div class="card" role="article">
-          <h3>
+          <div class="card-top-row">
+            <label class="check-inline" aria-label="Select workout ${w.id}">
+              <input class="workout-select" type="checkbox" value="${w.id}" />
+              Select
+            </label>
+          </div>  
+        <h3>
             <a href="/workout/${w.id}" aria-label="Open workout details">
               ${escapeHtml(displayTitle)} — ${escapeHtml(w.workout_date)}
             </a>
@@ -115,6 +169,9 @@ async function loadHistory() {
         </div>
       `;
     }).join("");
+
+    attachHistorySelectionHandlers();
+    updateHistorySelectionUI();
   } catch (e) {
     listEl.innerHTML = `<div class="errors"><strong>Error:</strong> ${escapeHtml(e.message)}</div>`;
   }
@@ -128,6 +185,36 @@ async function seedData() {
   } catch (e) {
     showToast(`Seed failed: ${e.message}`, { ms: 3000 });
   }
+}
+
+async function deleteSelectedWorkouts() {
+  const ids = Array.from(historyState.selectedIds);
+  if (ids.length === 0) return;
+
+  const ok = confirm(`Delete ${ids.length} selected workout(s) permanently? This cannot be undone.`);
+  if (!ok) return;
+
+  const res = await fetchJson("/api/workouts", {
+    method: "DELETE",
+    body: JSON.stringify({ ids })
+  });
+  showToast(`Deleted ${res.deleted_count} workout(s).`);
+  await loadHistory();
+}
+
+async function deleteAllWorkouts() {
+  const total = historyState.workouts.length;
+  if (total === 0) return;
+
+  const ok = confirm(`Delete ALL ${total} workouts permanently? This cannot be undone.`);
+  if (!ok) return;
+
+  const res = await fetchJson("/api/workouts", {
+    method: "DELETE",
+    body: JSON.stringify({ all: true })
+  });
+  showToast(`Deleted ${res.deleted_count} workout(s).`);
+  await loadHistory();
 }
 
 // ------------------------------------------------------
@@ -536,6 +623,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (page === "history") {
     $("#refresh-history")?.addEventListener("click", loadHistory);
     $("#seed-data")?.addEventListener("click", seedData);
+    $("#delete-selected")?.addEventListener("click", async () => {
+      try {
+        await deleteSelectedWorkouts();
+      } catch (e) {
+        showToast(`Delete failed: ${e.message}`, { ms: 3000 });
+      }
+    });
+    $("#delete-all")?.addEventListener("click", async () => {
+      try {
+        await deleteAllWorkouts();
+      } catch (e) {
+        showToast(`Delete failed: ${e.message}`, { ms: 3000 });
+      }
+    });
+    $("#select-all-workouts")?.addEventListener("change", (e) => {
+      const checked = Boolean(e.target.checked);
+      const checkboxes = $all(".workout-select");
+      historyState.selectedIds = new Set();
+      checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+          const id = Number(cb.value);
+          if (Number.isFinite(id)) historyState.selectedIds.add(id);
+        }
+      });
+      updateHistorySelectionUI();
+    });
+
     await loadHistory();
   }
 

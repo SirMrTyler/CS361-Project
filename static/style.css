@@ -186,6 +186,23 @@ input[type="text"], input[type="date"], input[type="number"] {
   .card-list { grid-template-columns: 1fr; }
 }
 
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text);
+}
+
+.check-inline input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+}
+
+.card-top-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .card {
   border: 1px solid var(--border);
   background: var(--panel);

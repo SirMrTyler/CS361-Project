@@ -13,6 +13,7 @@ Data persists in a local SQLite database file (instance/workouts.sqlite3).
 from __future__ import annotations
 
 import os
+import dotenv
 import sqlite3
 import time
 from functools import wraps
@@ -35,12 +36,14 @@ def create_app() -> Flask:
     # Store DB in instance/ so it doesn't get accidentally committed.
     os.makedirs(app.instance_path, exist_ok=True)
     app.config["DATABASE_PATH"] = os.path.join(app.instance_path, "workouts.sqlite3")
-    app.config["AUTH_BASE_URL"] = os.getenv(
-        "AUTH_BASE_URL",
-        "https://very-ardenia-sirmrtyler-tech-solutions-llc-1a046f3f.koyeb.app",
-    ).rstrip("/")
-    app.config["AUTH_APP_ID"] = os.getenv("AUTH_APP_ID", "workouts-app")
-    app.config["AUTH_APP_SECRET"] = os.getenv("AUTH_APP_SECRET", "bench225")
+    print(f"DATABASE_PATH: {app.config['DATABASE_PATH']}")
+    app.config["AUTH_BASE_URL"] = dotenv.dotenv_values().get("AUTH_BASE_URL")
+    print(f"AUTH_BASE_URL from .env: {app.config['AUTH_BASE_URL']}")
+    
+    app.config["AUTH_APP_ID"] = dotenv.dotenv_values().get("AUTH_APP_ID")
+    print(f"AUTH_APP_ID from .env: {app.config['AUTH_APP_ID']}")
+    app.config["AUTH_APP_SECRET"] = dotenv.dotenv_values().get("AUTH_APP_SECRET")
+    print(f"AUTH_APP_SECRET from .env: {app.config['AUTH_APP_SECRET']}")
 
     init_db(app.config["DATABASE_PATH"])
 
@@ -210,6 +213,34 @@ def create_app() -> Flask:
         if not deleted:
             return jsonify({"ok": False, "error": "Workout not found."}), 404
         return jsonify({"ok": True})
+
+    @app.delete("/api/workouts")
+    @require_login(api=True)
+    def api_bulk_delete_workouts():
+        payload = request.get_json(silent=True) or {}
+        delete_all = bool(payload.get("all"))
+        ids_raw = payload.get("ids")
+
+        if delete_all:
+            deleted_count = delete_all_workouts(app.config["DATABASE_PATH"])
+            return jsonify({"ok": True, "deleted_count": deleted_count, "scope": "all"})
+
+        if not isinstance(ids_raw, list) or len(ids_raw) == 0:
+            return jsonify({"ok": False, "error": "Provide a non-empty list of workout IDs or set all=true."}), 400
+
+        ids: List[int] = []
+        for item in ids_raw:
+            try:
+                workout_id = int(item)
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "error": "Workout IDs must be integers."}), 400
+            if workout_id < 1:
+                return jsonify({"ok": False, "error": "Workout IDs must be positive integers."}), 400
+            if workout_id not in ids:
+                ids.append(workout_id)
+
+        deleted_count = delete_workouts_by_ids(app.config["DATABASE_PATH"], ids)
+        return jsonify({"ok": True, "deleted_count": deleted_count, "scope": "selected"})
 
     # Helpful for demonstrating responsiveness with 200 workouts (Issue #12)
     @app.post("/api/debug/seed")
@@ -540,6 +571,30 @@ def delete_workout(db_path: str, workout_id: int) -> bool:
         with conn:
             cur = conn.execute("DELETE FROM workouts WHERE id = ?;", (workout_id,))
             return cur.rowcount > 0
+    finally:
+        conn.close()
+
+def delete_workouts_by_ids(db_path: str, workout_ids: List[int]) -> int:
+    unique_ids = sorted(set(int(i) for i in workout_ids if int(i) > 0))
+    if not unique_ids:
+        return 0
+
+    placeholders = ", ".join(["?"] * len(unique_ids))
+    conn = get_db_connection(db_path)
+    try:
+        with conn:
+            cur = conn.execute(f"DELETE FROM workouts WHERE id IN ({placeholders});", tuple(unique_ids))
+            return int(cur.rowcount)
+    finally:
+        conn.close()
+
+
+def delete_all_workouts(db_path: str) -> int:
+    conn = get_db_connection(db_path)
+    try:
+        with conn:
+            cur = conn.execute("DELETE FROM workouts;")
+            return int(cur.rowcount)
     finally:
         conn.close()
 
