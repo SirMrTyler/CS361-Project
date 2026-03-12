@@ -94,6 +94,13 @@ def create_app() -> Flask:
 
         return decorator
 
+    def get_current_user_id() -> Optional[str]:
+        user = session.get("auth_user") or {}
+        user_id = user.get("userId")
+        if user_id is None:
+            return None
+        return str(user_id)
+
     # ----------------------------
     # UI routes
     # ----------------------------
@@ -164,16 +171,22 @@ def create_app() -> Flask:
     @app.get("/api/workouts")
     @require_login(api=True)
     def api_list_workouts():
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
         t0 = time.perf_counter()
-        workouts = list_workouts(app.config["DATABASE_PATH"])
+        workouts = list_workouts(app.config["DATABASE_PATH"], user_id)
         elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
         return jsonify({"ok": True, "workouts": workouts, "timing_ms": elapsed_ms})
 
     @app.get("/api/workouts/<int:workout_id>")
     @require_login(api=True)
     def api_get_workout(workout_id: int):
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
         t0 = time.perf_counter()
-        workout = get_workout(app.config["DATABASE_PATH"], workout_id)
+        workout = get_workout(app.config["DATABASE_PATH"], workout_id, user_id)
         elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
         if workout is None:
             return jsonify({"ok": False, "error": "Workout not found."}), 404
@@ -182,34 +195,44 @@ def create_app() -> Flask:
     @app.post("/api/workouts")
     @require_login(api=True)
     def api_create_workout():
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
         payload = request.get_json(silent=True) or {}
         errors = validate_workout_payload(payload)
         if errors:
             return jsonify({"ok": False, "errors": errors}), 400
 
-        workout_id = create_workout(app.config["DATABASE_PATH"], payload)
-        workout = get_workout(app.config["DATABASE_PATH"], workout_id)
+        workout_id = create_workout(app.config["DATABASE_PATH"], payload, user_id)
+        workout = get_workout(app.config["DATABASE_PATH"], workout_id, user_id)
         return jsonify({"ok": True, "workout_id": workout_id, "workout": workout}), 201
 
     @app.put("/api/workouts/<int:workout_id>")
     @require_login(api=True)
     def api_update_workout(workout_id: int):
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
         payload = request.get_json(silent=True) or {}
         errors = validate_workout_payload(payload)
         if errors:
             return jsonify({"ok": False, "errors": errors}), 400
 
-        updated = update_workout(app.config["DATABASE_PATH"], workout_id, payload)
+        updated = update_workout(app.config["DATABASE_PATH"], workout_id, payload, user_id)
         if not updated:
             return jsonify({"ok": False, "error": "Workout not found."}), 404
 
-        workout = get_workout(app.config["DATABASE_PATH"], workout_id)
+        workout = get_workout(app.config["DATABASE_PATH"], workout_id, user_id)
         return jsonify({"ok": True, "workout": workout})
 
     @app.delete("/api/workouts/<int:workout_id>")
     @require_login(api=True)
     def api_delete_workout(workout_id: int):
-        deleted = delete_workout(app.config["DATABASE_PATH"], workout_id)
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
+
+        deleted = delete_workout(app.config["DATABASE_PATH"], workout_id, user_id)
         if not deleted:
             return jsonify({"ok": False, "error": "Workout not found."}), 404
         return jsonify({"ok": True})
@@ -217,12 +240,16 @@ def create_app() -> Flask:
     @app.delete("/api/workouts")
     @require_login(api=True)
     def api_bulk_delete_workouts():
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
+
         payload = request.get_json(silent=True) or {}
         delete_all = bool(payload.get("all"))
         ids_raw = payload.get("ids")
 
         if delete_all:
-            deleted_count = delete_all_workouts(app.config["DATABASE_PATH"])
+            deleted_count = delete_all_workouts(app.config["DATABASE_PATH"], user_id)
             return jsonify({"ok": True, "deleted_count": deleted_count, "scope": "all"})
 
         if not isinstance(ids_raw, list) or len(ids_raw) == 0:
@@ -239,17 +266,20 @@ def create_app() -> Flask:
             if workout_id not in ids:
                 ids.append(workout_id)
 
-        deleted_count = delete_workouts_by_ids(app.config["DATABASE_PATH"], ids)
+        deleted_count = delete_workouts_by_ids(app.config["DATABASE_PATH"], ids, user_id)
         return jsonify({"ok": True, "deleted_count": deleted_count, "scope": "selected"})
 
     # Helpful for demonstrating responsiveness with 200 workouts (Issue #12)
     @app.post("/api/debug/seed")
     @require_login(api=True)
     def api_debug_seed():
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"ok": False, "error": "User identity missing from session."}), 401
         payload = request.get_json(silent=True) or {}
         count = int(payload.get("count", 200))
         count = max(1, min(count, 2000))  # keep bounded
-        created = seed_sample_data(app.config["DATABASE_PATH"], count=count)
+        created = seed_sample_data(app.config["DATABASE_PATH"], user_id=user_id, count=count)
         return jsonify({"ok": True, "created": created})
     
     @app.context_processor
@@ -274,6 +304,7 @@ def init_db(db_path: str) -> None:
             """
             CREATE TABLE IF NOT EXISTS workouts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
                 workout_date TEXT NOT NULL, -- ISO date YYYY-MM-DD
                 title TEXT,
                 created_at TEXT NOT NULL,
@@ -297,11 +328,18 @@ def init_db(db_path: str) -> None:
                 FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_workouts_date ON workouts(workout_date DESC);
             CREATE INDEX IF NOT EXISTS idx_exercises_workout ON exercises(workout_id, sort_order);
             CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_id, set_number);
             """
         )
+        # Backfill/migrate older databases that predate user-scoped workouts.
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(workouts);").fetchall()]
+        if "user_id" not in cols:
+            conn.execute("ALTER TABLE workouts ADD COLUMN user_id TEXT;")
+            conn.execute("UPDATE workouts SET user_id = ? WHERE user_id IS NULL OR user_id = '';", ("legacy",))
+            conn.commit()
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_date ON workouts(user_id, workout_date DESC);")
         conn.commit()
     finally:
         conn.close()
@@ -396,7 +434,7 @@ def validate_workout_payload(payload: Dict[str, Any]) -> List[str]:
 # DB operations
 # ----------------------------
 
-def list_workouts(db_path: str) -> List[Dict[str, Any]]:
+def list_workouts(db_path: str, user_id: str) -> List[Dict[str, Any]]:
     conn = get_db_connection(db_path)
     try:
         rows = conn.execute(
@@ -412,9 +450,11 @@ def list_workouts(db_path: str) -> List[Dict[str, Any]]:
             FROM workouts w
             LEFT JOIN exercises e ON e.workout_id = w.id
             LEFT JOIN sets s ON s.exercise_id = e.id
+            WHERE w.user_id = ?
             GROUP BY w.id
             ORDER BY w.workout_date DESC, w.id DESC;
-            """
+            """,
+            (user_id,),
         ).fetchall()
 
         return [dict(r) for r in rows]
@@ -422,16 +462,16 @@ def list_workouts(db_path: str) -> List[Dict[str, Any]]:
         conn.close()
 
 
-def get_workout(db_path: str, workout_id: int) -> Optional[Dict[str, Any]]:
+def get_workout(db_path: str, workout_id: int, user_id: str) -> Optional[Dict[str, Any]]:
     conn = get_db_connection(db_path)
     try:
         w = conn.execute(
             """
             SELECT id, workout_date, COALESCE(title, '') AS title, created_at, updated_at
             FROM workouts
-            WHERE id = ?;
+            WHERE id = ? AND user_id = ?;
             """,
-            (workout_id,),
+            (workout_id, user_id),
         ).fetchone()
 
         if w is None:
@@ -480,17 +520,17 @@ def get_workout(db_path: str, workout_id: int) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
-def create_workout(db_path: str, payload: Dict[str, Any]) -> int:
+def create_workout(db_path: str, payload: Dict[str, Any], user_id: str) -> int:
     conn = get_db_connection(db_path)
     now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     try:
         with conn:
             cur = conn.execute(
                 """
-                INSERT INTO workouts (workout_date, title, created_at, updated_at)
-                VALUES (?, ?, ?, ?);
+                INSERT INTO workouts (user_id, workout_date, title, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?);
                 """,
-                (_parse_iso_date(payload["workout_date"]), (payload.get("title") or "").strip() or None, now, now),
+                (user_id, _parse_iso_date(payload["workout_date"]), (payload.get("title") or "").strip() or None, now, now),
             )
             workout_id = int(cur.lastrowid)
 
@@ -517,7 +557,7 @@ def create_workout(db_path: str, payload: Dict[str, Any]) -> int:
         conn.close()
 
 
-def update_workout(db_path: str, workout_id: int, payload: Dict[str, Any]) -> bool:
+def update_workout(db_path: str, workout_id: int, payload: Dict[str, Any], user_id: str) -> bool:
     """
     Update by rewriting the workout's exercises+sets inside a transaction.
     This is simple, reliable, and avoids partial update states.
@@ -526,7 +566,7 @@ def update_workout(db_path: str, workout_id: int, payload: Dict[str, Any]) -> bo
     now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     try:
         with conn:
-            exists = conn.execute("SELECT 1 FROM workouts WHERE id = ?;", (workout_id,)).fetchone()
+            exists = conn.execute("SELECT 1 FROM workouts WHERE id = ? AND user_id = ?;", (workout_id, user_id)).fetchone()
             if exists is None:
                 return False
 
@@ -534,9 +574,9 @@ def update_workout(db_path: str, workout_id: int, payload: Dict[str, Any]) -> bo
                 """
                 UPDATE workouts
                 SET workout_date = ?, title = ?, updated_at = ?
-                WHERE id = ?;
+                WHERE id = ? AND user_id = ?;
                 """,
-                (_parse_iso_date(payload["workout_date"]), (payload.get("title") or "").strip() or None, now, workout_id),
+                (_parse_iso_date(payload["workout_date"]), (payload.get("title") or "").strip() or None, now, workout_id, user_id),
             )
 
             # Delete existing children (CASCADE handles sets)
@@ -565,16 +605,16 @@ def update_workout(db_path: str, workout_id: int, payload: Dict[str, Any]) -> bo
         conn.close()
 
 
-def delete_workout(db_path: str, workout_id: int) -> bool:
+def delete_workout(db_path: str, workout_id: int, user_id: str) -> bool:
     conn = get_db_connection(db_path)
     try:
         with conn:
-            cur = conn.execute("DELETE FROM workouts WHERE id = ?;", (workout_id,))
+            cur = conn.execute("DELETE FROM workouts WHERE id = ? AND user_id = ?;", (workout_id, user_id))
             return cur.rowcount > 0
     finally:
         conn.close()
 
-def delete_workouts_by_ids(db_path: str, workout_ids: List[int]) -> int:
+def delete_workouts_by_ids(db_path: str, workout_ids: List[int], user_id: str) -> int:
     unique_ids = sorted(set(int(i) for i in workout_ids if int(i) > 0))
     if not unique_ids:
         return 0
@@ -583,17 +623,17 @@ def delete_workouts_by_ids(db_path: str, workout_ids: List[int]) -> int:
     conn = get_db_connection(db_path)
     try:
         with conn:
-            cur = conn.execute(f"DELETE FROM workouts WHERE id IN ({placeholders});", tuple(unique_ids))
+            cur = conn.execute(f"DELETE FROM workouts WHERE user_id = ? AND id IN ({placeholders});", (user_id, *tuple(unique_ids)))
             return int(cur.rowcount)
     finally:
         conn.close()
 
 
-def delete_all_workouts(db_path: str) -> int:
+def delete_all_workouts(db_path: str, user_id: str) -> int:
     conn = get_db_connection(db_path)
     try:
         with conn:
-            cur = conn.execute("DELETE FROM workouts;")
+            cur = conn.execute("DELETE FROM workouts WHERE user_id = ?;", (user_id,))
             return int(cur.rowcount)
     finally:
         conn.close()
@@ -603,7 +643,7 @@ def delete_all_workouts(db_path: str) -> int:
 # Demo data (for responsiveness demo)
 # ----------------------------
 
-def seed_sample_data(db_path: str, count: int = 200) -> int:
+def seed_sample_data(db_path: str, user_id: str, count: int = 200) -> int:
     """
     Inserts 'count' fake workouts quickly for demonstrating responsiveness.
     """
@@ -640,8 +680,8 @@ def seed_sample_data(db_path: str, count: int = 200) -> int:
                 # reuse create_workout logic but inline for speed
                 now = datetime.utcnow().isoformat(timespec="seconds") + "Z"
                 cur = conn.execute(
-                    "INSERT INTO workouts (workout_date, title, created_at, updated_at) VALUES (?, ?, ?, ?);",
-                    (payload["workout_date"], None, now, now),
+                    "INSERT INTO workouts (user_id, workout_date, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?);",
+                    (user_id, payload["workout_date"], None, now, now),
                 )
                 workout_id = int(cur.lastrowid)
                 for sort_order, ex in enumerate(payload["exercises"], start=1):
