@@ -101,7 +101,7 @@ These map directly to the GitHub issues for Sprint 1.
 
 ## TODO - Notes - Issues
 
-1. Add ability to delete multilple workouts at once
+1. Let users see individual workout history (filtered by login)
 2. Add picture entries capabilities to exercises.
 3. Add premade exercise/workouts templates (helps with new users).
 
