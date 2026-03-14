@@ -19,7 +19,7 @@ import sqlite3
 import time
 from functools import wraps
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -76,12 +76,18 @@ def create_app() -> Flask:
 
         return data, None
 
-    def service_post(base_url: str, path: str, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    def service_post(
+        base_url: str,
+        path: str,
+        payload: Dict[str, Any],
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[int]]:
         url = f"{base_url.rstrip('/')}{path}"
+        print(f"[microservice] POST {url} payload_keys={list(payload.keys())}")
         try:
             resp = requests.post(url, json=payload, timeout=8)
-        except requests.RequestException:
-            return None, "Microservice unavailable. Please try again shortly."
+        except requests.RequestException as exc:
+            print(f"[microservice] request failed for {url}: {exc}")
+            return None, f"Microservice unavailable ({url}). Ensure the service is running and base URL is correct.", None
 
         try:
             data = resp.json()
@@ -89,19 +95,43 @@ def create_app() -> Flask:
             data = {}
 
         if not resp.ok:
-            return data, f"Microservice request failed ({resp.status_code})."
-        return data, None
+            print(f"[microservice] {url} -> {resp.status_code} body={data or resp.text}")
+            return data, f"Microservice request failed ({resp.status_code}).", resp.status_code
+        print(f"[microservice] {url} -> {resp.status_code} body={data}")
+        return data, None, resp.status_code
 
     def verify_email_address(email: str) -> Tuple[bool, Optional[str]]:
         # Always enforce basic format locally.
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             return False, "Please enter a valid email address."
 
-        data, err = service_post(app.config["EMAIL_VERIFY_BASE_URL"], "/email/verify", {"email": email})
+        data, err, status_code = service_post(app.config["EMAIL_VERIFY_BASE_URL"], "/email/verify", {"email": email})
         if err:
-            # Do not block account creation when the verification microservice is unavailable.
-            print("Email verification service unavailable; allowing signup with format-only validation.")
-            return True, None
+            if status_code is None:
+                # Do not block account creation only when the verification microservice cannot be reached.
+                print(f"Email verification service unavailable at {app.config['EMAIL_VERIFY_BASE_URL']}: {err}; allowing signup with format-only validation.")
+                return True, None
+
+            detail_parts: List[str] = []
+            if isinstance(data, dict):
+                provider_error = data.get("error")
+                if isinstance(provider_error, dict):
+                    provider_code = str(provider_error.get("code") or "").strip()
+                    provider_message = str(provider_error.get("message") or "").strip()
+                    if provider_code:
+                        detail_parts.append(provider_code)
+                    if provider_message:
+                        detail_parts.append(provider_message)
+                elif provider_error:
+                    detail_parts.append(str(provider_error).strip())
+
+                provider_message = str(data.get("message") or "").strip()
+                if provider_message:
+                    detail_parts.append(provider_message)
+
+            detail = " — ".join(part for part in detail_parts if part)
+            message = detail or f"Email verification service returned {status_code}."
+            return False, f"Email verification failed: {message}"
 
         if not data:
             return True, None
@@ -113,11 +143,15 @@ def create_app() -> Flask:
         return True, None
 
     def send_email_notification(to_email: str, subject: str, body: str) -> bool:
-        _, err = service_post(
+        _, err, _ = service_post(
             app.config["EMAIL_SENDER_BASE_URL"],
             "/email/send",
             {"to": to_email, "subject": subject, "body": body},
         )
+        if err:
+            print(f"Email sender request failed for {to_email} via {app.config['EMAIL_SENDER_BASE_URL']}: {err}")
+        else:
+            print(f"Email sender request succeeded for {to_email}.")
         return err is None
 
     def fetch_buddha_quote() -> Optional[Dict[str, str]]:
@@ -554,7 +588,7 @@ def get_user_email(db_path: str, user_id: str, username: str) -> Optional[str]:
 
 def upsert_user_email(db_path: str, user_id: str, username: str, email: str) -> None:
     conn = get_db_connection(db_path)
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(UTC).isoformat()
     try:
         conn.execute(
             """
