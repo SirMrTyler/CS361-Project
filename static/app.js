@@ -182,6 +182,7 @@ async function seedData() {
     await fetchJson("/api/debug/seed", { method: "POST", body: JSON.stringify({ count: 200 }) });
     showToast("Created 200 sample workouts.");
     await loadHistory();
+    await loadBuddhaQuote();
   } catch (e) {
     showToast(`Seed failed: ${e.message}`, { ms: 3000 });
   }
@@ -215,6 +216,29 @@ async function deleteAllWorkouts() {
   });
   showToast(`Deleted ${res.deleted_count} workout(s).`);
   await loadHistory();
+}
+
+async function loadBuddhaQuote() {
+  const textEl = $("#buddha-quote-text");
+  const byEl = $("#buddha-quote-by");
+  const imgEl = $("#buddha-quote-image");
+  if (!textEl || !byEl || !imgEl) return;
+
+  try {
+    const data = await fetchJson("/api/buddha-quote");
+    const quote = data.quote || {};
+    textEl.textContent = quote.text || "Peace comes from within. Do not seek it without.";
+    byEl.textContent = `— ${quote.byName || "Buddha"}`;
+    if (quote.byImage) {
+      imgEl.src = quote.byImage;
+      imgEl.alt = quote.byName || "Buddha";
+      imgEl.hidden = false;
+    } else {
+      imgEl.hidden = true;
+    }
+  } catch (e) {
+    showToast(`Quote unavailable: ${e.message}`, { ms: 2500 });
+  }
 }
 
 // ------------------------------------------------------
@@ -622,6 +646,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (page === "history") {
     $("#refresh-history")?.addEventListener("click", loadHistory);
+    $("#refresh-quote")?.addEventListener("click", loadBuddhaQuote);
     $("#seed-data")?.addEventListener("click", seedData);
     $("#delete-selected")?.addEventListener("click", async () => {
       try {
@@ -652,6 +677,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     await loadHistory();
+    await loadBuddhaQuote();
   }
 
   if (page === "workout_view") {

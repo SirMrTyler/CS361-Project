@@ -21,6 +21,11 @@
       <input type="password" name="password" required />
     </label>
 
+    <label class="field">
+      <span>Email (required for Create account)</span>
+      <input type="email" name="email" value="{{ email if email else '' }}" />
+    </label>
+
     <div class="row">
       <button class="button nav-primary" type="submit" name="mode" value="login">Login</button>
       <button class="button button-secondary" type="submit" name="mode" value="signup">Create account</button>

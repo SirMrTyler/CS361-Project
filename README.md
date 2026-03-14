@@ -29,6 +29,26 @@ python app.py
 
 Open: `http://127.0.0.1:5000`
 
+### Microservice environment variables
+
+To enable email verification/sending and Buddha quote integration, set these in your `.env` file (or shell env):
+
+```bash
+AUTH_BASE_URL=<existing auth service url>
+AUTH_APP_ID=workouts-app
+AUTH_APP_SECRET=<secret>
+
+EMAIL_VERIFY_BASE_URL=http://127.0.0.1:8001
+EMAIL_SENDER_BASE_URL=http://127.0.0.1:8000
+BUDDHA_QUOTES_URL=https://buddha-quote-gen.onrender.com/
+```
+
+Behavior:
+
+- On **Create account**, email is required and verified via the email-verification microservice before signup.
+- After signup/login, the app attempts to send a notification email via email-sender microservice when an address is available.
+- Workout History includes a Buddha quote card with a **New Quote** button backed by the buddha-quote microservice.
+
 ### Data persistence
 
 The SQLite DB is created automatically at:

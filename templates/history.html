@@ -3,6 +3,20 @@
 <section class="page">
   <h2>Workout History</h2>
 
+  <section class="quote-panel" aria-live="polite">
+    <div class="row row-spaced">
+      <h3>Daily Buddha Quote</h3>
+      <button class="button button-secondary" id="refresh-quote" type="button">New Quote</button>
+    </div>
+    <blockquote id="buddha-quote-text">{{ quote.text if quote else 'Peace comes from within. Do not seek it without.' }}</blockquote>
+    <div class="muted" id="buddha-quote-by">— {{ quote.byName if quote else 'Buddha' }}</div>
+    {% if quote and quote.byImage %}
+      <img id="buddha-quote-image" class="quote-image" src="{{ quote.byImage }}" alt="{{ quote.byName }}" />
+    {% else %}
+      <img id="buddha-quote-image" class="quote-image" src="" alt="Buddha" hidden />
+    {% endif %}
+  </section>
+
   <!-- IH#2: explain costs -->
   <p class="muted">
     Tip: logging a workout usually takes <strong>1–2 minutes</strong>. You can always edit later.

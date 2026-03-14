@@ -13,6 +13,7 @@ Data persists in a local SQLite database file (instance/workouts.sqlite3).
 from __future__ import annotations
 
 import os
+import re
 import dotenv
 import sqlite3
 import time
@@ -44,6 +45,9 @@ def create_app() -> Flask:
     print(f"AUTH_APP_ID from .env: {app.config['AUTH_APP_ID']}")
     app.config["AUTH_APP_SECRET"] = dotenv.dotenv_values().get("AUTH_APP_SECRET")
     print(f"AUTH_APP_SECRET from .env: {app.config['AUTH_APP_SECRET']}")
+    app.config["EMAIL_SENDER_BASE_URL"] = dotenv.dotenv_values().get("EMAIL_SENDER_BASE_URL", "http://127.0.0.1:8000")
+    app.config["EMAIL_VERIFY_BASE_URL"] = dotenv.dotenv_values().get("EMAIL_VERIFY_BASE_URL", "http://127.0.0.1:8001")
+    app.config["BUDDHA_QUOTES_URL"] = dotenv.dotenv_values().get("BUDDHA_QUOTES_URL", "https://buddha-quote-gen.onrender.com/")
 
     init_db(app.config["DATABASE_PATH"])
 
@@ -71,6 +75,65 @@ def create_app() -> Flask:
             return None, message
 
         return data, None
+
+    def service_post(base_url: str, path: str, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        url = f"{base_url.rstrip('/')}{path}"
+        try:
+            resp = requests.post(url, json=payload, timeout=8)
+        except requests.RequestException:
+            return None, "Microservice unavailable. Please try again shortly."
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+
+        if not resp.ok:
+            return data, f"Microservice request failed ({resp.status_code})."
+        return data, None
+
+    def verify_email_address(email: str) -> Tuple[bool, Optional[str]]:
+        # Always enforce basic format locally.
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            return False, "Please enter a valid email address."
+
+        data, err = service_post(app.config["EMAIL_VERIFY_BASE_URL"], "/email/verify", {"email": email})
+        if err:
+            # Do not block account creation when the verification microservice is unavailable.
+            print("Email verification service unavailable; allowing signup with format-only validation.")
+            return True, None
+
+        if not data:
+            return True, None
+
+        if data.get("isDeliverable") is False:
+            reason = data.get("reason") or "not_deliverable"
+            return False, f"Email could not be verified ({reason})."
+
+        return True, None
+
+    def send_email_notification(to_email: str, subject: str, body: str) -> bool:
+        _, err = service_post(
+            app.config["EMAIL_SENDER_BASE_URL"],
+            "/email/send",
+            {"to": to_email, "subject": subject, "body": body},
+        )
+        return err is None
+
+    def fetch_buddha_quote() -> Optional[Dict[str, str]]:
+        try:
+            resp = requests.post(app.config["BUDDHA_QUOTES_URL"], json={}, timeout=8)
+            data = resp.json() if resp.ok else {}
+        except (requests.RequestException, ValueError):
+            return None
+
+        if not isinstance(data, dict) or not data.get("text"):
+            return None
+        return {
+            "text": str(data.get("text", "")).strip(),
+            "byName": str(data.get("byName", "Buddha")).strip(),
+            "byImage": str(data.get("byImage", "")).strip(),
+        }
 
     def require_login(api: bool = False):
         def decorator(view_func):
@@ -108,8 +171,15 @@ def create_app() -> Flask:
     @app.get("/")
     @require_login()
     def home() -> str:
-        # Temporary landing = history page (consistent with Sprint 1 plan)
-        return render_template("history.html")
+        return render_template("history.html", quote=fetch_buddha_quote())
+
+    @app.get("/api/buddha-quote")
+    @require_login(api=True)
+    def api_buddha_quote():
+        quote = fetch_buddha_quote()
+        if not quote:
+            return jsonify({"ok": False, "error": "Could not load quote right now."}), 503
+        return jsonify({"ok": True, "quote": quote})
 
     @app.get("/login")
     def login_page() -> str:
@@ -121,10 +191,18 @@ def create_app() -> Flask:
     def login_action():
         username = (request.form.get("username") or "").strip()
         password = request.form.get("password") or ""
+        email = (request.form.get("email") or "").strip().lower()
         mode = (request.form.get("mode") or "login").strip().lower()
 
         if not username or not password:
             return render_template("login.html", error="Username and password are required."), 400
+        
+        if mode == "signup":
+            if not email:
+                return render_template("login.html", error="Email is required for signup.", username=username), 400
+            is_valid_email, email_error = verify_email_address(email)
+            if not is_valid_email:
+                return render_template("login.html", error=email_error, username=username, email=email), 400
 
         endpoint = "/signup" if mode == "signup" else "/login"
         data, err = auth_post(endpoint, {"username": username, "password": password})
@@ -137,6 +215,23 @@ def create_app() -> Flask:
             "sessionId": data.get("sessionId"),
             "token": data.get("token"),
         }
+
+        user_id = str(data.get("userId") or "")
+        if mode == "signup" and user_id:
+            upsert_user_email(app.config["DATABASE_PATH"], user_id, username, email)
+            send_email_notification(
+                email,
+                "Welcome to Workout Logger",
+                "<p>Your account was created successfully.</p>",
+            )
+        elif mode != "signup" and user_id:
+            saved_email = get_user_email(app.config["DATABASE_PATH"], user_id, username)
+            if saved_email:
+                send_email_notification(
+                    saved_email,
+                    "New Workout Logger login",
+                    f"<p>Hi {username}, a login to your account was detected.</p>",
+                )
         return redirect(url_for("home"))
 
     @app.get("/logout")
@@ -328,6 +423,15 @@ def init_db(db_path: str) -> None:
                 FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS user_emails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL UNIQUE,
+                username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_exercises_workout ON exercises(workout_id, sort_order);
             CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_id, set_number);
             """
@@ -433,6 +537,40 @@ def validate_workout_payload(payload: Dict[str, Any]) -> List[str]:
 # ----------------------------
 # DB operations
 # ----------------------------
+
+def get_user_email(db_path: str, user_id: str, username: str) -> Optional[str]:
+    conn = get_db_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT email FROM user_emails WHERE user_id = ? OR username = ? ORDER BY id DESC LIMIT 1;",
+            (user_id, username),
+        ).fetchone()
+        if not row:
+            return None
+        return str(row["email"])
+    finally:
+        conn.close()
+
+
+def upsert_user_email(db_path: str, user_id: str, username: str, email: str) -> None:
+    conn = get_db_connection(db_path)
+    now = datetime.utcnow().isoformat()
+    try:
+        conn.execute(
+            """
+            INSERT INTO user_emails (user_id, username, email, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                email = excluded.email,
+                updated_at = excluded.updated_at;
+            """,
+            (user_id, username, email, now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
 
 def list_workouts(db_path: str, user_id: str) -> List[Dict[str, Any]]:
     conn = get_db_connection(db_path)
